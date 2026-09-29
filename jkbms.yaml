@@ -1,0 +1,981 @@
+substitutions:
+  name: jk-bms
+  bms0: "${name}_1"
+  bms1: "${name}_2"
+#  bms2: "${name}_3"
+  device_description: "Monitor and control a JK-BMS v11 via bluetooth"
+  external_components_source: github://syssi/esphome-jk-bms@main
+  bms1_mac_address: AA:BB:CC:DD:EE:F1
+  bms0_mac_address: AA:BB:CC:DD:EE:F2
+#  bms2_mac_address: AA:BB:CC:DD:EE:F3
+  # Please use "JK02_24S" if you own a old JK-BMS < hardware version 11.0 (hardware version >= 6.0 and < 11.0)
+  # Please use "JK02_32S" if you own a new JK-BMS >= hardware version 11.0 (f.e. JK-B2A8S20P hw 11.XW, sw 11.26)
+  # Please use "JK04" if you have some old JK-BMS <= hardware version 3.0 (f.e. JK-B2A16S hw 3.0, sw. 3.3.0)
+  bms0_protocol_version: JK02_32S
+  bms1_protocol_version: JK02_32S
+#  bms2_protocol_version: JK02_32S
+
+esphome:
+  name: ${name}
+  comment: ${device_description}
+  min_version: 2024.6.0
+  project:
+    name: "syssi.esphome-jk-bms"
+    version: 2.1.0
+
+  on_boot:
+    priority: -100
+    then:
+      - component.update: bms0_mac_text
+      - component.update: bms1_mac_text
+#      - component.update: bms2_mac_text
+      - text_sensor.template.publish:
+          id: esp_status
+          state: "Normal"  
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: ESP32S3
+  flash_size: 16MB
+  framework:
+    type: arduino
+
+external_components:
+  - source: ${external_components_source}
+    refresh: 0s
+
+wifi:
+
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+
+web_server:
+  port: 80
+  auth:
+    username: !secret web_server_username
+    password: !secret web_server_password  
+    
+# Enable fallback hotspot (captive portal) in case wifi connection fails
+#  ap:
+#    ssid: "jk-bms"
+#    password: "1234567890"
+
+#captive_portal:
+
+ota:
+  platform: esphome
+  on_begin:
+    then:
+      - switch.turn_off: ble_client_switch0
+      - switch.turn_off: ble_client_switch1
+#      - switch.turn_off: ble_client_switch2
+      - logger.log: "BLE connection suspended for OTA update"
+
+logger:
+  level: ERROR
+#  logs:
+#    esp32_ble_tracker: WARN
+#    esp32_ble_client: WARN
+#    jk_bms_ble: WARN
+
+
+api:
+  encryption:
+    key: "MICdddY7PT0y1C2dvvMohLgVt3MP0HPzBgC6HLiZQMI="
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: false
+    interval: 1500ms
+    window: 300ms
+
+ble_client:
+
+# Master(1)  
+  - mac_address: ${bms0_mac_address}
+    id: client0
+
+# Slave_1(2)
+  - mac_address: ${bms1_mac_address}
+    id: client1
+
+# Slave_2(3)
+#  - mac_address: ${bms2_mac_address}
+#    id: client2        
+
+jk_bms_ble:
+
+# Master(1)  
+  - ble_client_id: client0
+    protocol_version: ${bms0_protocol_version}
+    throttle: 10s
+    id: bms0
+
+# Slave_1(2)
+  - ble_client_id: client1
+    protocol_version: ${bms1_protocol_version}
+    throttle: 10s
+    id: bms1
+
+# Slave_2(3)
+#  - ble_client_id: client2
+#    protocol_version: ${bms2_protocol_version}
+#    throttle: 5s
+#    id: bms2        
+
+light:
+  - platform: monochromatic
+    output: WIFI_LED
+    id: status_led
+    default_transition_length: 0s
+    effects:
+      - pulse:
+          name: "Slow Pulse"
+          transition_length: 2s
+          update_interval: 2s
+      - pulse:
+          name: "Fast Pulse"
+          transition_length: 0.5s
+          update_interval: 0.5s
+
+output:
+  - platform: ledc
+    pin: GPIO2
+    id: WIFI_LED 
+
+binary_sensor:
+
+# Przycisk resetu sieci WiFi
+#  - platform: gpio
+#    pin:
+#      number: GPIO0
+#      inverted: true
+#    id: esp_reset
+#    filters:
+#      - delayed_on: 5s
+#    on_press:
+#      then:
+#        - text_sensor.template.publish:
+#            id: esp_status
+#            state: "Reset settings"
+#        - logger.log: "Resetting preferences - the device will return to AP mode"
+#        - repeat:
+#            count: 5
+#            then:
+#              - light.turn_on: status_led
+#              - delay: 500ms
+#              - light.turn_off: status_led
+#              - delay: 500ms
+#        - delay: 5s
+#        - button.press: do_factory_reset  
+
+# Master(1)  
+  - platform: jk_bms_ble  
+    jk_bms_ble_id: bms0
+    balancing:
+      name: "${bms0} balancing"
+    charging:
+      name: "${bms0} charging"
+    discharging:
+      name: "${bms0} discharging"
+#    heating:
+#      name: "${bms0} heating"
+#    online_status:
+#      name: "${bms0} online status"
+
+# Slave_1(2)  
+  - platform: jk_bms_ble  
+    jk_bms_ble_id: bms1
+    balancing:
+      name: "${bms1} balancing"
+    charging:
+      name: "${bms1} charging"
+    discharging:
+      name: "${bms1} discharging"
+
+# Slave_2(3)  
+#  - platform: jk_bms_ble  
+#    jk_bms_ble_id: bms2
+#    balancing:
+#      name: "${bms2} balancing"
+#    charging:
+#      name: "${bms2} charging"
+#    discharging:
+#      name: "${bms2} discharging" 
+
+button:
+
+# Ukryty przycisk fabrycznego resetu
+#  - platform: factory_reset
+#    id: do_factory_reset
+#    internal: true  
+
+# Master(1)
+  - platform: jk_bms_ble  
+    jk_bms_ble_id: bms0
+    retrieve_settings:
+      name: "${bms0} retrieve settings"
+      id: retrieve_resistance_bms0
+    retrieve_device_info:
+      name: "${bms0} retrieve device info"
+
+# Slave_1(2)
+  - platform: jk_bms_ble  
+    jk_bms_ble_id: bms1
+    retrieve_settings:
+      name: "${bms1} retrieve settings"
+      id: retrieve_resistance_bms1
+    retrieve_device_info:
+      name: "${bms1} retrieve device info"
+
+# Slave_2(3)
+#  - platform: jk_bms_ble  
+#    jk_bms_ble_id: bms2
+#    retrieve_settings:
+#      name: "${bms2} retrieve settings"
+#      id: retrieve_resistance_bms2
+#    retrieve_device_info:
+#      name: "${bms2} retrieve device info" 
+
+number:
+
+# Master(1) 
+  - platform: jk_bms_ble 
+    jk_bms_ble_id: bms0
+    balance_trigger_voltage:
+      name: "${bms0} balance trigger voltage"
+#    cell_count:
+#      name: "${bms0} cell count"
+#    total_battery_capacity:
+#      name: "${bms0} total battery capacity"
+#    cell_voltage_overvoltage_protection:
+#      name: "${bms0} cell voltage overvoltage protection"
+#    cell_voltage_overvoltage_recovery:
+#      name: "${bms0} cell voltage overvoltage recovery"
+#    cell_voltage_undervoltage_protection:
+#      name: "${bms0} cell voltage undervoltage protection"
+#    cell_voltage_undervoltage_recovery:
+#      name: "${bms0} cell voltage undervoltage recovery"
+    balance_starting_voltage:
+      name: "${bms0} balance starting voltage"
+#    voltage_calibration:
+#      name: "${bms0} voltage calibration"
+#    current_calibration:
+#      name: "${bms0} current calibration"
+#    power_off_voltage:
+#      name: "${bms0} power off voltage"
+    max_balance_current:
+      name: "${bms0} max balance current"
+#    max_charge_current:
+#      name: "${bms0} max charge current"
+#    max_discharge_current:
+#      name: "${bms0} max discharge current"
+#    smart_sleep_voltage:
+#      name: "${bms0} smart sleep voltage"
+#    cell_soc100_voltage:
+#      name: "${bms0} cell soc100 voltage"
+#    cell_soc0_voltage:
+#      name: "${bms0} cell soc0 voltage"
+#    cell_request_charge_voltage:
+#      name: "${bms0} cell request charge voltage"
+#    cell_request_float_voltage:
+#      name: "${bms0} cell request float voltage"
+#    cell_request_charge_voltage_time:
+#      name: "${bms0} cell request charge voltage time"
+#    cell_request_float_voltage_time:
+#      name: "${bms0} cell request float voltage time"
+#    charge_overcurrent_protection_delay:
+#      name: "${bms0} charge overcurrent protection delay"
+#    charge_overcurrent_protection_recovery_time:
+#      name: "${bms0} charge overcurrent protection recovery time"
+#    discharge_overcurrent_protection_delay:
+#      name: "${bms0} discharge overcurrent protection delay"
+#    discharge_overcurrent_protection_recovery_time:
+#      name: "${bms0} discharge overcurrent protection recovery time"
+#    short_circuit_protection_delay:
+#      name: "${bms0} short circuit protection delay"
+#    short_circuit_protection_recovery_time:
+#      name: "${bms0} short circuit protection recovery time"
+#    charge_overtemperature_protection:
+#      name: "${bms0} charge overtemperature protection"
+#    charge_overtemperature_protection_recovery:
+#      name: "${bms0} charge overtemperature protection recovery"
+#    discharge_overtemperature_protection:
+#      name: "${bms0} discharge overtemperature protection"
+#    discharge_overtemperature_protection_recovery:
+#      name: "${bms0} discharge overtemperature protection recovery"
+#    charge_undertemperature_protection:
+#      name: "${bms0} charge undertemperature protection"
+#    charge_undertemperature_protection_recovery:
+#      name: "${bms0} charge undertemperature protection recovery"
+#    power_tube_overtemperature_protection:
+#      name: "${bms0} power tube overtemperature protection"
+#    power_tube_overtemperature_protection_recovery:
+#      name: "${bms0} power tube overtemperature protection recovery"
+
+# Slave_1(2) 
+  - platform: jk_bms_ble 
+    jk_bms_ble_id: bms1
+    balance_trigger_voltage:
+      name: "${bms1} balance trigger voltage"
+    balance_starting_voltage:
+      name: "${bms1} balance starting voltage"
+    max_balance_current:
+      name: "${bms1} max balance current"      
+
+# Slave_2(3) 
+#  - platform: jk_bms_ble 
+#    jk_bms_ble_id: bms2
+#    balance_trigger_voltage:
+#      name: "${bms2} balance trigger voltage"
+#    balance_starting_voltage:
+#      name: "${bms2} balance starting voltage"
+
+sensor:
+
+# Wolny RAM ESP32 (esp-idf)
+  - platform: template
+    name: "${name} Free RAM"
+    lambda: "return (float)esp_get_free_heap_size() / 1024.0;"
+    update_interval: 10s
+    unit_of_measurement: "kB"
+    accuracy_decimals: 1
+    entity_category: diagnostic  
+
+# Kontrola sygnału WIFI
+  - platform: wifi_signal
+    name: "WiFi signal strenght"
+    update_interval: 10s       
+
+# Sumaryczna moc (W)
+  - platform: template
+    name: "Total power"
+    id: Laczna_moc
+    unit_of_measurement: "W"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: |-
+      return id(LFP_1_moc).state + id(LFP_2_moc).state; 
+
+# Lambda dla 3 magazynów
+#      return id(LFP_1_moc).state + id(LFP_2_moc).state + id(LFP_3_moc).state; 
+
+# Sumaryczna moc oddana (W)
+  - platform: template
+    name: "Total discharging power"
+    id: Laczna_moc_oddawana
+    unit_of_measurement: "W"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: |-
+      return id(LFP_1_oddanie).state + id(LFP_2_oddanie).state;
+
+# Lambda dla 3 magazynów
+#      return id(LFP_1_oddanie).state + id(LFP_2_oddanie).state + id(LFP_3_oddanie).state;      
+
+# Sumaryczna moc przyjęta (W)
+  - platform: template
+    name: "Total Charging power"
+    id: Laczna_moc_przyjmowana
+    unit_of_measurement: "W"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: |-
+      return id(LFP_1_przyjecie).state + id(LFP_2_przyjecie).state; 
+
+# Lambda dla 3 magazynów
+#      return id(LFP_1_przyjecie).state + id(LFP_2_przyjecie).state + id(LFP_3_przyjecie).state;
+
+# Całkowita energia oddana przez cały system (kWh)
+  - platform: integration
+    name: "LFP discharging total"
+    sensor: Laczna_moc_oddawana
+    time_unit: h
+    restore: true
+    icon: mdi:counter
+    state_class: total_increasing
+    device_class: energy
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.001
+    unit_of_measurement: kWh  
+
+# Całkowita energia przyjęta przez cały system (kWh)
+  - platform: integration
+    name: "LFP charging total"
+    sensor: Laczna_moc_przyjmowana
+    time_unit: h
+    restore: true
+    icon: mdi:counter
+    state_class: total_increasing
+    device_class: energy
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.001
+    unit_of_measurement: kWh  
+
+# Energia oddana dzisiaj dla całego systemu
+  - platform: total_daily_energy
+    name: "LFP discharging today"
+    restore: true
+    icon: mdi:counter
+    power_id: Laczna_moc_oddawana
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.001
+    unit_of_measurement: kWh
+    device_class: energy 
+
+# Energia przyjęta dzisiaj dla całego systemu
+  - platform: total_daily_energy
+    name: "LFP charging today"
+    restore: true
+    icon: mdi:counter
+    power_id: Laczna_moc_przyjmowana
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.001
+    unit_of_measurement: kWh
+    device_class: energy 
+
+# Master(1) 
+  - platform: jk_bms_ble 
+    jk_bms_ble_id: bms0
+#    min_cell_voltage:
+#      name: "${bms0} min cell voltage"
+#    max_cell_voltage:
+#      name: "${bms0} max cell voltage"
+    min_voltage_cell:
+      name: "${bms0} min voltage cell"
+    max_voltage_cell:
+      name: "${bms0} max voltage cell"
+    delta_cell_voltage:
+      name: "${bms0} delta cell voltage"
+    average_cell_voltage:
+      name: "${bms0} average cell voltage"
+    cell_voltage_1:
+      name: "${bms0} cell voltage 1"
+    cell_voltage_2:
+      name: "${bms0} cell voltage 2"
+    cell_voltage_3:
+      name: "${bms0} cell voltage 3"
+    cell_voltage_4:
+      name: "${bms0} cell voltage 4"
+    cell_voltage_5:
+      name: "${bms0} cell voltage 5"
+    cell_voltage_6:
+      name: "${bms0} cell voltage 6"
+    cell_voltage_7:
+      name: "${bms0} cell voltage 7"
+    cell_voltage_8:
+      name: "${bms0} cell voltage 8"
+    cell_voltage_9:
+      name: "${bms0} cell voltage 9"
+    cell_voltage_10:
+      name: "${bms0} cell voltage 10"
+    cell_voltage_11:
+      name: "${bms0} cell voltage 11"
+    cell_voltage_12:
+      name: "${bms0} cell voltage 12"
+    cell_voltage_13:
+      name: "${bms0} cell voltage 13"
+    cell_voltage_14:
+      name: "${bms0} cell voltage 14"
+    cell_voltage_15:
+      name: "${bms0} cell voltage 15"
+    cell_voltage_16:
+      name: "${bms0} cell voltage 16"
+
+    cell_resistance_1:
+      name: "${bms0} cell resistance 1"
+    cell_resistance_2:
+      name: "${bms0} cell resistance 2"
+    cell_resistance_3:
+      name: "${bms0} cell resistance 3"
+    cell_resistance_4:
+      name: "${bms0} cell resistance 4"
+    cell_resistance_5:
+      name: "${bms0} cell resistance 5"
+    cell_resistance_6:
+      name: "${bms0} cell resistance 6"
+    cell_resistance_7:
+      name: "${bms0} cell resistance 7"
+    cell_resistance_8:
+      name: "${bms0} cell resistance 8"
+    cell_resistance_9:
+      name: "${bms0} cell resistance 9"
+    cell_resistance_10:
+      name: "${bms0} cell resistance 10"
+    cell_resistance_11:
+      name: "${bms0} cell resistance 11"
+    cell_resistance_12:
+      name: "${bms0} cell resistance 12"
+    cell_resistance_13:
+      name: "${bms0} cell resistance 13"
+    cell_resistance_14:
+      name: "${bms0} cell resistance 14"
+    cell_resistance_15:
+      name: "${bms0} cell resistance 15"
+    cell_resistance_16:
+      name: "${bms0} cell resistance 16"    
+    total_voltage:
+      name: "${bms0} total voltage"
+    current:
+      name: "${bms0} current"
+#    heating_current:
+#      name: "${bms0} heating current"
+    power:
+      name: "${bms0} power"
+      id: LFP_1_moc
+    charging_power:
+      name: "${bms0} charging power"
+      id: LFP_1_przyjecie
+    discharging_power:
+      name: "${bms0} discharging power"
+      id: LFP_1_oddanie
+    temperature_sensor_1:
+      name: "${bms0} temperature sensor 1"
+    temperature_sensor_2:
+      name: "${bms0} temperature sensor 2"
+    temperature_sensor_3:
+      name: "${bms0} temperature sensor 3"
+    temperature_sensor_4:
+      name: "${bms0} temperature sensor 4"
+#    temperature_sensor_5:
+#      name: "${bms0} temperature sensor 5"
+    power_tube_temperature:
+      name: "${bms0} power tube temperature"
+#    balancing:
+#      name: "${bms0} balancing"
+    state_of_charge:
+      name: "${bms0} state of charge"
+    capacity_remaining:
+      name: "${bms0} capacity remaining"
+    total_battery_capacity_setting:
+      name: "${bms0} total battery capacity setting"
+    charging_cycles:
+      name: "${bms0} charging cycles"
+    total_charging_cycle_capacity:
+      name: "${bms0} total charging cycle capacity"
+#    total_runtime:
+#      name: "${bms0} total runtime"
+    balancing_current:
+      name: "${bms0} balancing current"
+#    errors_bitmask:
+#      name: "${bms0} errors bitmask"
+#    emergency_time_countdown:
+#      name: "${bms0} emergency time countdown"
+
+# Slave_1(2) 
+  - platform: jk_bms_ble 
+    jk_bms_ble_id: bms1
+    min_voltage_cell:
+      name: "${bms1} min voltage cell"
+    max_voltage_cell:
+      name: "${bms1} max voltage cell"
+    delta_cell_voltage:
+      name: "${bms1} delta cell voltage"
+    average_cell_voltage:
+      name: "${bms1} average cell voltage"
+    cell_voltage_1:
+      name: "${bms1} cell voltage 1"
+    cell_voltage_2:
+      name: "${bms1} cell voltage 2"
+    cell_voltage_3:
+      name: "${bms1} cell voltage 3"
+    cell_voltage_4:
+      name: "${bms1} cell voltage 4"
+    cell_voltage_5:
+      name: "${bms1} cell voltage 5"
+    cell_voltage_6:
+      name: "${bms1} cell voltage 6"
+    cell_voltage_7:
+      name: "${bms1} cell voltage 7"
+    cell_voltage_8:
+      name: "${bms1} cell voltage 8"
+    cell_voltage_9:
+      name: "${bms1} cell voltage 9"
+    cell_voltage_10:
+      name: "${bms1} cell voltage 10"
+    cell_voltage_11:
+      name: "${bms1} cell voltage 11"
+    cell_voltage_12:
+      name: "${bms1} cell voltage 12"
+    cell_voltage_13:
+      name: "${bms1} cell voltage 13"
+    cell_voltage_14:
+      name: "${bms1} cell voltage 14"
+    cell_voltage_15:
+      name: "${bms1} cell voltage 15"
+    cell_voltage_16:
+      name: "${bms1} cell voltage 16"
+
+    cell_resistance_1:
+      name: "${bms1} cell resistance 1"
+    cell_resistance_2:
+      name: "${bms1} cell resistance 2"
+    cell_resistance_3:
+      name: "${bms1} cell resistance 3"
+    cell_resistance_4:
+      name: "${bms1} cell resistance 4"
+    cell_resistance_5:
+      name: "${bms1} cell resistance 5"
+    cell_resistance_6:
+      name: "${bms1} cell resistance 6"
+    cell_resistance_7:
+      name: "${bms1} cell resistance 7"
+    cell_resistance_8:
+      name: "${bms1} cell resistance 8"
+    cell_resistance_9:
+      name: "${bms1} cell resistance 9"
+    cell_resistance_10:
+      name: "${bms1} cell resistance 10"
+    cell_resistance_11:
+      name: "${bms1} cell resistance 11"
+    cell_resistance_12:
+      name: "${bms1} cell resistance 12"
+    cell_resistance_13:
+      name: "${bms1} cell resistance 13"
+    cell_resistance_14:
+      name: "${bms1} cell resistance 14"
+    cell_resistance_15:
+      name: "${bms1} cell resistance 15"
+    cell_resistance_16:
+      name: "${bms1} cell resistance 16"     
+    
+    total_voltage:
+      name: "${bms1} total voltage"
+    current:
+      name: "${bms1} current"
+    power:
+      name: "${bms1} power"
+      id: LFP_2_moc
+    charging_power:
+      name: "${bms1} charging power"
+      id: LFP_2_przyjecie
+    discharging_power:
+      name: "${bms1} discharging power"
+      id: LFP_2_oddanie
+    temperature_sensor_1:
+      name: "${bms1} temperature sensor 1"
+    temperature_sensor_2:
+      name: "${bms1} temperature sensor 2"
+    temperature_sensor_3:
+      name: "${bms1} temperature sensor 3"
+    temperature_sensor_4:
+      name: "${bms1} temperature sensor 4"
+    power_tube_temperature:
+      name: "${bms1} power tube temperature"
+    balancing:
+      name: "${bms1} balancing"
+    state_of_charge:
+      name: "${bms1} state of charge"
+    capacity_remaining:
+      name: "${bms1} capacity remaining"
+    total_battery_capacity_setting:
+      name: "${bms1} total battery capacity setting"
+    charging_cycles:
+      name: "${bms1} charging cycles"
+    total_charging_cycle_capacity:
+      name: "${bms1} total charging cycle capacity"
+    balancing_current:
+      name: "${bms1} balancing current"
+
+# Slave_2(3) 
+#  - platform: jk_bms_ble 
+#    jk_bms_ble_id: bms2
+#    min_voltage_cell:
+#      name: "${bms2} min voltage cell"
+#    max_voltage_cell:
+#      name: "${bms2} max voltage cell"
+#    delta_cell_voltage:
+#      name: "${bms2} delta cell voltage"
+#    average_cell_voltage:
+#      name: "${bms2} average cell voltage"
+#    cell_voltage_1:
+#      name: "${bms2} cell voltage 1"
+#    cell_voltage_2:
+#      name: "${bms2} cell voltage 2"
+#    cell_voltage_3:
+#      name: "${bms2} cell voltage 3"
+#    cell_voltage_4:
+#      name: "${bms2} cell voltage 4"
+#    cell_voltage_5:
+#      name: "${bms2} cell voltage 5"
+#    cell_voltage_6:
+#      name: "${bms2} cell voltage 6"
+#    cell_voltage_7:
+#      name: "${bms2} cell voltage 7"
+#    cell_voltage_8:
+#      name: "${bms2} cell voltage 8"
+#    cell_voltage_9:
+#      name: "${bms2} cell voltage 9"
+#    cell_voltage_10:
+#      name: "${bms2} cell voltage 10"
+#    cell_voltage_11:
+#      name: "${bms2} cell voltage 11"
+#    cell_voltage_12:
+#      name: "${bms2} cell voltage 12"
+#    cell_voltage_13:
+#      name: "${bms2} cell voltage 13"
+#    cell_voltage_14:
+#      name: "${bms2} cell voltage 14"
+#    cell_voltage_15:
+#      name: "${bms2} cell voltage 15"
+#    cell_voltage_16:
+#      name: "${bms2} cell voltage 16"
+
+#    cell_resistance_1:
+#      name: "${bms2} cell resistance 1"
+#    cell_resistance_2:
+#      name: "${bms2} cell resistance 2"
+#    cell_resistance_3:
+#      name: "${bms2} cell resistance 3"
+#    cell_resistance_4:
+#      name: "${bms2} cell resistance 4"
+#    cell_resistance_5:
+#      name: "${bms2} cell resistance 5"
+#    cell_resistance_6:
+#      name: "${bms2} cell resistance 6"
+#    cell_resistance_7:
+#      name: "${bms2} cell resistance 7"
+#    cell_resistance_8:
+#      name: "${bms2} cell resistance 8"
+#    cell_resistance_9:
+#      name: "${bms2} cell resistance 9"
+#    cell_resistance_10:
+#      name: "${bms2} cell resistance 10"
+#    cell_resistance_11:
+#      name: "${bms2} cell resistance 11"
+#    cell_resistance_12:
+#      name: "${bms2} cell resistance 12"
+#    cell_resistance_13:
+#      name: "${bms2} cell resistance 13"
+#    cell_resistance_14:
+#      name: "${bms2} cell resistance 14"
+#    cell_resistance_15:
+#      name: "${bms2} cell resistance 15"
+#    cell_resistance_16:
+#      name: "${bms2} cell resistance 16"        
+    
+#    total_voltage:
+#      name: "${bms2} total voltage"
+#    current:
+#      name: "${bms2} current"
+#    power:
+#      name: "${bms2} power"
+#      id: LFP_3_moc
+#    charging_power:
+#      name: "${bms2} charging power"
+#      id: LFP_3_przyjecie
+#    discharging_power:
+#      name: "${bms2} discharging power"
+#      id: LFP_3_oddanie
+#    temperature_sensor_1:
+#      name: "${bms2} temperature sensor 1"
+#    temperature_sensor_2:
+#      name: "${bms2} temperature sensor 2"
+#    temperature_sensor_3:
+#      name: "${bms2} temperature sensor 3"
+#    temperature_sensor_4:
+#      name: "${bms2} temperature sensor 4"
+#    power_tube_temperature:
+#      name: "${bms2} power tube temperature"
+#    balancing:
+#      name: "${bms2} balancing"
+#    state_of_charge:
+#      name: "${bms2} state of charge"
+#    capacity_remaining:
+#      name: "${bms2} capacity remaining"
+#    total_battery_capacity_setting:
+#      name: "${bms2} total battery capacity setting"
+#    charging_cycles:
+#      name: "${bms2} charging cycles"
+#    total_charging_cycle_capacity:
+#      name: "${bms2} total charging cycle capacity"
+#    balancing_current:
+#      name: "${bms2} balancing current"           
+
+switch:
+
+  # Przycisk Restartujący
+  - platform: restart
+    name: "jk_bms_connector_Restart"    
+
+# Master(1) 
+  - platform: jk_bms_ble 
+    jk_bms_ble_id: bms0
+    charging:
+      name: "${bms0} charging"
+    discharging:
+      name: "${bms0} discharging"
+    balancer:
+      name: "${bms0} balancer"
+#    emergency:
+#      name: "${bms0} emergency"
+#    heating:
+#      name: "${bms0} heating"
+#    disable_temperature_sensors:
+#      name: "${bms0} disable temperature sensors"
+#    display_always_on:
+#      name: "${bms0} display always on"
+#    smart_sleep:
+#      name: "${bms0} smart sleep"
+#    disable_pcl_module:
+#      name: "${bms0} disable pcl module"
+#    timed_stored_data:
+#      name: "${bms0} timed stored data"
+#    charging_float_mode:
+#      name: "${bms0} charging float mode"
+
+# Slave_1(2) 
+  - platform: jk_bms_ble 
+    jk_bms_ble_id: bms1
+    charging:
+      name: "${bms1} charging"
+    discharging:
+      name: "${bms1} discharging"
+    balancer:
+      name: "${bms1} balancer"
+
+# Slave_2(3) 
+#  - platform: jk_bms_ble 
+#    jk_bms_ble_id: bms2
+#    charging:
+#      name: "${bms2} charging"
+#    discharging:
+#      name: "${bms2} discharging"
+#    balancer:
+#      name: "${bms2} balancer"   
+
+# Master(1)
+  - platform: ble_client  
+    ble_client_id: client0
+    id: ble_client_switch0
+    name: "${bms0} enable bluetooth connection"
+
+# Slave_1(2) 
+  - platform: ble_client 
+    ble_client_id: client1
+    id: ble_client_switch1
+    name: "${bms1} enable bluetooth connection"
+
+# Slave_2(3) 
+#  - platform: ble_client 
+#    ble_client_id: client2
+#    id: ble_client_switch2
+#    name: "${bms2} enable bluetooth connection"    
+
+text_sensor:
+
+  - platform: template
+    name: "Status"
+    id: esp_status
+    entity_category: diagnostic
+    icon: mdi:information-outline
+    update_interval: never
+
+  # Stały MAC pierwszego BMS-a
+  - platform: template
+    name: "${bms0} BLE"
+    id: bms0_mac_text
+    entity_category: diagnostic
+    icon: mdi:bluetooth
+    lambda: |-
+      return {"${bms0_mac_address}"};
+    update_interval: never
+
+#   Stały MAC drugiego BMS-a
+  - platform: template
+    name: "${bms1} BLE"
+    id: bms1_mac_text
+    entity_category: diagnostic
+    icon: mdi:bluetooth
+    lambda: |-
+      return {"${bms1_mac_address}"};
+    update_interval: never 
+
+#   Stały MAC trzeciego BMS-a
+#  - platform: template
+#    name: "${bms2} BLE"
+#    id: bms2_mac_text
+#    entity_category: diagnostic
+#    icon: mdi:bluetooth
+#    lambda: |-
+#      return {"${bms2_mac_address}"};
+#    update_interval: never   
+
+# Wifi Info
+  - platform: wifi_info
+    ip_address:
+      name: "${name} IP"
+    ssid:
+      name: "${name} SSID"
+    mac_address:
+      name: "${name} MAC"
+
+# Master(1)
+  - platform: jk_bms_ble  
+    jk_bms_ble_id: bms0
+#    errors:
+#      name: "${bms0} errors"
+    total_runtime_formatted:
+      name: "${bms0} total runtime formatted"
+
+# Slave_1(2)
+  - platform: jk_bms_ble  
+    jk_bms_ble_id: bms1
+    total_runtime_formatted:
+      name: "${bms1} total runtime formatted"
+
+# Slave_2(3)
+#  - platform: jk_bms_ble  
+#    jk_bms_ble_id: bms2
+#    total_runtime_formatted:
+#      name: "${bms2} total runtime formatted" 
+
+interval:
+  - interval: 24h
+    then:
+      - logger.log: "BMS0 resistance update"
+      - button.press: retrieve_resistance_bms0
+      - delay: 2s
+      - logger.log: "Aktualizacja rezystancji BMS1"
+      - button.press: retrieve_resistance_bms1
+      - delay: 2s
+#      - logger.log: "Aktualizacja rezystancji BMS2"
+#      - button.press: retrieve_resistance_bms2
+  
+# Niebieska Kontrolka  
+  - interval: 5s
+    then:
+      - if:
+          condition:
+            not:
+              wifi.connected: {}
+          then:
+            - light.turn_on:
+                id: status_led
+                effect: "Slow Pulse"
+          else:
+            - if:
+                condition:
+                  not:
+                    api.connected: {}
+                then:
+                  - light.turn_on:
+                      id: status_led
+                      effect: "Fast Pulse"
+                else:
+                  - light.turn_on:
+                      id: status_led
+                      brightness: 100%
+                      effect: none
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time          
